@@ -577,6 +577,10 @@ def main():
         df = df.head(args.limit)
         log(f"Limited to {args.limit} matches")
 
+    # Calculate how many we actually need to process
+    total_to_process = len(df) - len(existing_uids)
+    log(f"Matches to process: {total_to_process:,}")
+
     # Create driver
     driver = create_driver()
 
@@ -606,11 +610,13 @@ def main():
             # Scrape everything from this page
             info, driver = scrape_match_page(driver, url)
 
+            pct = (processed / total_to_process * 100) if total_to_process > 0 else 0
+
             if info['error']:
                 stats['errors'] += 1
                 ha_status = 'error'
                 ha_method = None
-                log(f"  [{processed}] {match_uid} ERROR: {info['error']}")
+                log(f"  [{processed}/{total_to_process}] ({pct:.1f}%) ERROR: {info['error']}")
             else:
                 ha_status, ha_method = determine_home_away_status(
                     csv_home_id, csv_away_id, info['page_home_id'], info['page_away_id'],
@@ -631,10 +637,8 @@ def main():
                 if info.get('page_court_type'):
                     stats['surface_found'] += 1
 
-                if ha_status != 'correct':
-                    log(f"  [{processed}] {match_uid} H/A:{ha_status.upper()} | "
-                        f"CSV: {csv_home_name} vs {csv_away_name} | "
-                        f"Page: {info['page_home_name']} vs {info['page_away_name']}")
+                log(f"  [{processed}/{total_to_process}] ({pct:.1f}%) {ha_status.upper()} | "
+                    f"{csv_home_name} vs {csv_away_name}")
 
             # Build result row
             result_row = {
@@ -655,17 +659,10 @@ def main():
             # Periodic save
             if len(results) >= SAVE_EVERY:
                 save_results(output_file, results)
-                remaining = len(df) - len(existing_uids) - processed
-                log(f"  Saved {SAVE_EVERY} | C:{stats['correct']} S:{stats['swapped']} "
+                log(f"  ** SAVED {SAVE_EVERY} | C:{stats['correct']} S:{stats['swapped']} "
                     f"U:{stats['unknown']} E:{stats['errors']} | "
-                    f"TB:{stats['tb_found']} T:{stats['time_found']} Srf:{stats['surface_found']} | ~{remaining} left")
+                    f"TB:{stats['tb_found']} T:{stats['time_found']} Srf:{stats['surface_found']} | {pct:.1f}% done **")
                 results = []
-
-            # Progress
-            if processed % 200 == 0:
-                log(f"  Progress: {processed:,} | C:{stats['correct']} S:{stats['swapped']} "
-                    f"U:{stats['unknown']} E:{stats['errors']} | "
-                    f"TB:{stats['tb_found']} T:{stats['time_found']} Srf:{stats['surface_found']}")
 
             time.sleep(random.uniform(*DELAY_BETWEEN_MATCHES))
 
